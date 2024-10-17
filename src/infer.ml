@@ -201,8 +201,66 @@ let apply (subs: substitutions) (t: typeScheme) : typeScheme =
 | - In the end we get a complete list of substitutions that helps  |
 |   resolve types of all expressions in our program.               |
 |******************************************************************)
-let rec unify (constraints: (typeScheme * typeScheme) list) : substitutions =
-  []
+let rec occurs (x: typeScheme) (y: typeScheme) =
+  match y with
+  | TNum -> false
+  | TBool -> false
+  | TStr -> false
+  | T _ -> if x = y then true else false
+  | TFun (a, b) -> occurs x a || occurs x b
+;;
+
+let is_func (x: typeScheme) =
+  match x with
+  | TFun (_, _) -> true
+  | _ -> false
+;;
+
+let is_type_var (x: typeScheme) =
+  match x with
+  | T _ -> true
+  | _ -> false
+;;
+
+let is_literal (x: typeScheme) = 
+  match x with
+  | TBool | TNum | TStr -> true
+  | _ -> false
+;;
+
+let substitution_sub_helper (find: string) (replace_with: typeScheme) (in_this: string * typeScheme): (string * typeScheme) = 
+  let (x, y) = in_this in 
+  (x, substitute replace_with find y)
+;;
+
+let constraint_sub_helper (find: string) (replace_with: typeScheme) (in_this: typeScheme * typeScheme): (typeScheme * typeScheme) = 
+  let (x, y) = in_this in 
+  ((substitute replace_with find x), (substitute replace_with find y))
+;;
+
+let rec unify_var (x: typeScheme) (y: typeScheme) (remaining_constraints: (typeScheme * typeScheme) list) (subs: substitutions): substitutions =
+  if not (occurs x y) then
+    let T s = x in 
+    unify (((s, y) :: (List.map (substitution_sub_helper s y) subs))) (List.map (constraint_sub_helper s y) remaining_constraints)
+  else raise OccursCheckException
+
+and unify (subs: substitutions) (constraints: (typeScheme * typeScheme) list) : substitutions =
+  match constraints with
+  | [] -> subs
+  | (x, y) :: remaining_constraints ->
+    if x = y then
+      unify subs remaining_constraints
+    else if is_type_var x then
+      unify_var x y remaining_constraints subs
+    else if is_type_var y then
+      unify_var y x remaining_constraints subs
+    else if is_func x && is_func y then
+      let TFun(a, b) = x in 
+      let TFun(c, d) = y in 
+      unify subs ((a, c) :: (b, d) :: remaining_constraints)
+    else
+      raise TypeError
+  ;;
 
 (* applies a final set of substitutions on the annotated expr *)
 let rec apply_expr (subs: substitutions) (ae: aexpr): aexpr =
@@ -226,7 +284,7 @@ let infer (e: expr) : typeScheme =
   let ae, t, constraints = gen env e in
   (*let _ = print_string "\n"; print_string (string_of_constraints constraints) in
   let _ = print_string "\n"; print_string (string_of_aexpr ae) in *)
-  let subs = unify constraints in
+  let subs = unify [] constraints in
   (* let _ = print_string "\n"; print_string (string_of_subs subs) in *)
   (* reset the type counter after completing inference *)
   type_variable := (Char.code 'a');
